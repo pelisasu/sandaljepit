@@ -1,0 +1,7 @@
+requests>=2.31.0
+pandas>=2.0.0
+numpy>=1.24.0
+xgboost>=1.7.0
+lightgbm>=3.3.5
+scikit-learn>=1.2.0
+google-generativeai>=0.3.0
