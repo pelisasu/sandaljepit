@@ -8,8 +8,9 @@ import pandas as pd
 from datetime import datetime
 import xgboost as xgb
 import lightgbm as lgb
-from sklearn.preprocessing import StandardScaler
-import google.generativeai as genai
+from sklearn.preprocessingencia import StandardScaler
+from google import genai
+from google.genai import types
 
 # Konfigurasi Environment & API Keys
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -17,7 +18,7 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 
-SYMBOL = "frxXAUUSD"  # Simbol Deriv untuk Gold
+SYMBOL = "frxXAUUSD"
 
 def send_telegram_message(message):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -36,21 +37,8 @@ def send_telegram_message(message):
         print(f"Gagal mengirim pesan Telegram: {e}")
 
 def fetch_deriv_candles(symbol=SYMBOL, granularity=900, count=100):
-    """
-    Mengambil data harga historis dari Deriv Public API (WebSocket/HTTP endpoint publik)
-    granularity 900 = M15 (15 Menit)
-    """
-    url = "https://deriv.com/api/v1/public-history" # Placeholder endpoint publik / alternatif REST
-    # Menggunakan public WebSocket API Deriv via HTTP Proxy / Public API endpoint
-    deriv_rest_url = f"https://api.deriv.com/basic/ticks_history?symbol={symbol}&end=latest&count={count}&granularity={granularity}&style=candles"
-    
+    """Mengambil data harga historis XAUUSD dari mirror publik stabil"""
     try:
-        # Mengambil dari API Publik Deriv via App ID publik standar (1089)
-        app_id = 1089
-        ws_url = f"wss://ws.derivws.com/websockets/v3?app_id={app_id}"
-        
-        # Sebagai alternatif yang handal dan ringan di GitHub Actions tanpa async websocket yang kompleks:
-        # Menggunakan endpoint alternatif penyedia data stabil (Yahoo Finance API untuk XAUUSD sebagai mirror, atau Deriv Public Data)
         fallback_url = f"https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=15m&range=5d"
         headers = {'User-Agent': 'Mozilla/5.0'}
         res = requests.get(fallback_url, headers=headers, timeout=10)
@@ -72,7 +60,6 @@ def fetch_deriv_candles(symbol=SYMBOL, granularity=900, count=100):
         return df
     except Exception as e:
         print(f"Error mengambil data harga: {e}")
-        # Generate dummy structure prevent crash if network block occurs
         return None
 
 class QuantSMCAnalyzer:
@@ -81,16 +68,14 @@ class QuantSMCAnalyzer:
         """Mendeteksi Order Block (OB), Fair Value Gap (FVG), dan Liquidity Sweep"""
         df['hl2'] = (df['high'] + df['low']) / 2
         
-        # Fair Value Gap (FVG) Detection
         df['fvg_bullish'] = (df['low'].shift(-1) > df['high'].shift(1))
         df['fvg_bearish'] = (df['high'].shift(-1) < df['low'].shift(1))
         
-        # Volume Profile POC (Point of Control)
+        # Volume Profile POC dengan parameter observed=True untuk mengatasi warning pandas
         price_bins = pd.cut(df['close'], bins=20)
-        poc = df.groupby(price_bins)['volume'].sum().idxmax()
+        poc = df.groupby(price_bins, observed=True)['volume'].sum().idxmax()
         poc_price = poc.mid if pd.notnull(poc) else df['close'].iloc[-1]
         
-        # Market Structure Break (MSB) / ChoCh Simulation
         rolling_max = df['high'].rolling(window=5).max()
         rolling_min = df['low'].rolling(window=5).min()
         
@@ -108,25 +93,27 @@ class QuantSMCAnalyzer:
 class DualAIEngine:
     @staticmethod
     def get_ai_consensus(market_data_summary):
-        """Dual AI Fallback: Google Gemini AI Studio -> DeepSeek API"""
+        """Dual AI Fallback: Google GenAI SDK (gemini-2.5-flash) -> DeepSeek API"""
         prompt = f"""
         Bertindaklah sebagai Senior Quantitative Risk Manager dan AI Trading Director.
-        Analisis data pasar XAUUSD berikut dan berikan keputusan final (STRONG BUY / STRONG SELL / HOLD):
+        Analisis data pasar XAUUSD berikut dan berikan keputusan final format JSON murni (tanpa teks lain) dengan kunci: "action" (STRONG BUY / STRONG SELL / HOLD), "confidence" (float 0.0 sampai 1.0), "reason" (string penjelasan singkat).
         Data: {json.dumps(market_data_summary)}
-        Berikan jawaban format JSON ketat dengan kunci: "action", "confidence", "reason".
         """
         
-        # 1. Coba Google Gemini AI Studio
+        # 1. Coba Google GenAI Terbaru
         if GEMINI_API_KEY:
             try:
-                genai.configure(api_key=GEMINI_API_KEY)
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                response = model.generate_content(prompt)
-                return json.loads(response.text.replace('```json', '').replace('```', '').strip())
+                client = genai.Client(api_key=GEMINI_API_KEY)
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=prompt,
+                )
+                clean_text = response.text.replace('```json', '').replace('```', '').strip()
+                return json.loads(clean_text)
             except Exception as e:
-                print(f"Gemini gagal, beralih ke DeepSeek: {e}")
+                print(f"Gemini SDK gagal, beralih ke DeepSeek: {e}")
                 
-        # 2. Fallback ke DeepSeek API
+        # 2. Fallback ke DeepSeek API dengan Error Handling Tangguh
         if DEEPSEEK_API_KEY:
             try:
                 ds_url = "https://api.deepseek.com/v1/chat/completions"
@@ -141,12 +128,16 @@ class DualAIEngine:
                 }
                 res = requests.post(ds_url, headers=headers, json=payload, timeout=15)
                 res_json = res.json()
-                content = res_json['choices'][0]['message']['content']
-                return json.loads(content.replace('```json', '').replace('```', '').strip())
+                
+                if 'choices' in res_json:
+                    content = res_json['choices'][0]['message']['content']
+                    clean_text = content.replace('```json', '').replace('```', '').strip()
+                    return json.loads(clean_text)
+                else:
+                    print(f"DeepSeek Response Error Structure: {res_json}")
             except Exception as e:
                 print(f"DeepSeek juga gagal: {e}")
                 
-        # Default fallback jika kedua AI offline
         return {"action": "HOLD", "confidence": 0.0, "reason": "AI engines unreachable"}
 
 def main():
@@ -169,17 +160,16 @@ def main():
         "msb_sell": smc_data["msb_sell"]
     }
     
-    print("Menjalankan Analisis Konsensus AI (Gemini / DeepSeek)...")
+    print("Menjalankan Analisis Konsensus AI (Gemini 2.5 / DeepSeek)...")
     ai_decision = DualAIEngine.get_ai_consensus(market_summary)
     
     action = ai_decision.get("action", "HOLD")
     confidence = ai_decision.get("confidence", 0)
     reason = ai_decision.get("reason", "No reason provided")
     
-    print(action, confidence, reason)
+    print(f"Hasil AI Decision -> Action: {action} | Confidence: {confidence} | Reason: {reason}")
     
-    # Eksekusi Sinyal Manual ke Telegram jika Confidence > 75%
-    if action in ["STRONG BUY", "STRONG SELL"] and confidence >= 0.75:
+    if action in ["STRONG BUY", "STRONG SELL"] and confidence >= 0.70:
         sl = current_price - 4.0 if action == "STRONG BUY" else current_price + 4.0
         tp1 = current_price + 8.0 if action == "STRONG BUY" else current_price - 8.0
         tp2 = current_price + 14.0 if action == "STRONG BUY" else current_price - 14.0
