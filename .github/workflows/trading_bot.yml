@@ -1,0 +1,46 @@
+name: XAUUSD Superintelligence Quant Bot
+
+on:
+  schedule:
+    - cron: '*/15 * * * *' # Berjalan setiap 15 menit
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run-bot:
+  runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Trading Engine
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          python bot.py
+
+      - name: Anti-Spam Git Commit (Keep-Alive)
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git pull origin main || echo "No remote changes"
+          date +%s > timestamp.txt
+          git add timestamp.txt
+          git commit -m "bot: heartbeat execution snapshot [skip ci]" || echo "No changes to commit"
+          git push || echo "Push skipped or unneeded"
