@@ -8,7 +8,7 @@ import pandas as pd
 from datetime import datetime
 import xgboost as xgb
 import lightgbm as lgb
-from sklearn.preprocessingencia import StandardScaler
+from sklearn.preprocessing import StandardScaler
 from google import genai
 from google.genai import types
 
