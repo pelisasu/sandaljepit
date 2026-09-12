@@ -37,9 +37,8 @@ jobs:
         run: |
           if [ -f titan_v4_state.json ]; then
             echo "State found"
-            cat titan_v4_state.json
           else
-            echo '{"active_trade": null, "daily_loss": 0, "last_day": 0}' > titan_v4_state.json
+            echo '{"active_trade": null, "daily_loss": 0, "last_day": 0, "last_signal_ts": 0, "total_signals": 0, "asia":0, "london":0, "ny":0}' > titan_v4_state.json
           fi
 
       - name: Run V4 Hybrid Live
@@ -48,8 +47,9 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TARGET_SYMBOL: "frxXAUUSD"
+          PYTHONUNBUFFERED: "1"
         run: |
-          timeout --preserve-status 19200s python bot_core.py || true
+          timeout --preserve-status 19200s python -u bot_core.py || true
 
       - name: Save State
         if: always()
@@ -57,8 +57,8 @@ jobs:
           git config --global user.name "Titan Bot"
           git config --global user.email "bot@titan.quant"
           git pull --rebase origin main || echo "Pull skip"
-          git add titan_v4_state.json
-          git diff --staged --quiet || git commit -m "chore: persist state [skip ci]"
+          git add titan_v4_state.json || true
+          git diff --staged --quiet || git commit -m "chore: persist state [skip ci]" || true
           git push origin main || echo "Push skip"
 
       - name: Self-Trigger Next Rotation
