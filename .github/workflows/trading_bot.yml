@@ -1,48 +1,38 @@
 name: Titan V4 Hybrid Engine
-
 on:
   schedule:
-        - cron: '0 */6 * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
-
 permissions:
   contents: write
   actions: write
-
 concurrency:
   group: quant-singleton-engine
   cancel-in-progress: false
-
 jobs:
   execute-titan-engine:
     runs-on: ubuntu-latest
     timeout-minutes: 350
     steps:
-            - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-
-            - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-
-            - run: pip install -r requirements.txt
-
-            - name: Restore State
-        run: |
-          if [ -f titan_v4_state.json ]; then cat titan_v4_state.json; else echo '{"active_trade": null, "daily_loss": 0}' > titan_v4_state.json; fi
-
-            - name: Run V4 Hybrid
+      - run: pip install -r requirements.txt
+      - name: Restore State
+        run: if [ -f titan_v4_state.json ]; then cat titan_v4_state.json; else echo '{"active_trade": null, "daily_loss": 0}' > titan_v4_state.json; fi
+      - name: Run V4 Hybrid
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TARGET_SYMBOL: "frxXAUUSD"
         run: timeout --preserve-status 19200s python bot_core.py || true
-
-            - name: Save State
+      - name: Save State
         if: always()
         run: |
           git config --global user.name "Titan Bot"
@@ -51,8 +41,7 @@ jobs:
           git add titan_v4_state.json
           git diff --staged --quiet || git commit -m "chore: persist state [skip ci]"
           git push origin main || true
-
-            - name: Self-Trigger Next
+      - name: Self-Trigger Next
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
