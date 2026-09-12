@@ -14,38 +14,34 @@ GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 STATE_FILE = "titan_v4_state.json"
 
 # ===== CONFIG ALL SESSION =====
-CHOP_THRESHOLD = 68.0      # V4.2: 65->68 biar Asia choppy tetep masuk
-VECTOR_MIN = 0.20          # 0.25->0.20
-DIST_POC_MIN = 0.6         # 0.8->0.6
-AI_CONF_MIN = 58           # 62->58
-ATR_MIN = 0.5              # 0.7->0.5 khusus Asia
-SIGNAL_COOLDOWN = 450      # 10 menit -> 7.5 menit biar all session dapet banyak
-BEP_TRIGGER = 4.0          # 5.0->4.0 lebih cepet BEP biar Asia gak balik
+CHOP_THRESHOLD = 68.0
+VECTOR_MIN = 0.20
+DIST_POC_MIN = 0.6
+AI_CONF_MIN = 58
+ATR_MIN = 0.5
+SIGNAL_COOLDOWN = 450
+BEP_TRIGGER = 4.0
 BEP_PLUS = 0.8
 RR_TARGET = 3.0
-MAX_DAILY_LOSS = 4         # 3->4 karena all session
+MAX_DAILY_LOSS = 4
 CANDLES_M5 = deque(maxlen=250)
 CANDLES_H1 = deque(maxlen=120)
 STATE = {"active_trade": None, "daily_loss": 0, "last_day": 0, "last_signal_ts": 0, "total_signals": 0, "asia":0, "london":0, "ny":0}
 
 def get_session():
     h = datetime.now(timezone.utc).hour
-    # Asia: 00-07 UTC (07-14 WIB)
-    # London: 07-13 UTC (14-20 WIB)  
-    # NY: 13-21 UTC (20-04 WIB)
     if 0 <= h < 7: return "ASIA"
     if 7 <= h < 13: return "LONDON"
     if 13 <= h < 21: return "NEWYORK"
-    return "OFF" # 21-00 UTC sepi
+    return "OFF"
 
 def session_params(sess):
-    # Adaptive filter per sesi
     if sess == "ASIA":
-        return {"chop": 70, "vec": 0.18, "atr": 0.4, "rr": 2.2} # Asia range kecil, RR kecilin
+        return {"chop": 70, "vec": 0.18, "atr": 0.4, "rr": 2.2}
     if sess == "LONDON":
         return {"chop": 66, "vec": 0.22, "atr": 0.6, "rr": 3.0}
     if sess == "NEWYORK":
-        return {"chop": 65, "vec": 0.20, "atr": 0.5, "rr": 3.5} # NY volatil gede, RR gede
+        return {"chop": 65, "vec": 0.20, "atr": 0.5, "rr": 3.5}
     return {"chop": 65, "vec": 0.25, "atr": 0.5, "rr": 2.5}
 
 async def tg_send(msg):
@@ -120,7 +116,7 @@ def detect_smc():
     body=abs(last['close']-last['open'])
     upper=last['high']-max(last['close'],last['open'])
     lower=min(last['close'],last['open'])-last['low']
-    bull_wick=lower>body*1.2 # dulu 1.5->1.2 biar Asia ketangkep
+    bull_wick=lower>body*1.2
     bear_wick=upper>body*1.2
     all_closes=[x['close'] for x in c]
     poc=sum(all_closes)/len(all_closes)
@@ -167,7 +163,6 @@ async def scan():
     if not smc: return
     print(f"[{sess} SCAN] {last['close']:.2f} ATR:{atr_v:.2f} CHOP:{chop_v:.1f} VEC:{vec_v:.2f} MACRO:{macro} RR:{params['rr']}")
 
-    # ADAPTIVE FILTER
     if atr_v < params["atr"]:
         print(f"[SKIP {sess} ATR {atr_v:.2f}<{params['atr']}]"); return
     if chop_v > params["chop"]:
@@ -176,15 +171,12 @@ async def scan():
         print(f"[SKIP {sess} VEC {vec_v:.2f}<{params['vec']}]"); return
 
     buy_cond=False; sell_cond=False
-    # ALL SESSION LOGIC: Asia boleh cuma wick + dist doang, gak harus FVG
     if sess=="ASIA":
         if last['low'] < smc['swing_low']*1.0001 and smc['bull_wick'] and smc['dist_poc']>0.5:
-            if macro in ["BULLISH","NEUTRAL","BEARISH"]: # Asia macro bebas, yang penting rejection
-                buy_cond=True
+            buy_cond=True
         if last['high'] > smc['swing_high']*0.9999 and smc['bear_wick'] and smc['dist_poc']>0.5:
-            if macro in ["BULLISH","NEUTRAL","BEARISH"]:
-                sell_cond=True
-    else: # London & NY tetap ketat dikit
+            sell_cond=True
+    else:
         if last['low'] < smc['swing_low'] and smc['bull_wick'] and (smc['fvg_bull'] or smc['msb_buy'] or sess=="NEWYORK") and smc['dist_poc']>DIST_POC_MIN:
             if macro in ["BULLISH","NEUTRAL"]: buy_cond=True
         if last['high'] > smc['swing_high'] and smc['bear_wick'] and (smc['fvg_bear'] or smc['msb_sell'] or sess=="NEWYORK") and smc['dist_poc']>DIST_POC_MIN:
@@ -244,7 +236,7 @@ async def manage():
             t['sl']=entry-BEP_PLUS; t['bep_done']=True; save_state(); await tg_send(f"🛡️ <b>BEP {side}</b> [{t['sess']}] SL->{t['sl']:.2f}")
     if side=="BUY":
         if price<=t['sl']:
-            bep=t.get("bep_done"); 
+            bep=t.get("bep_done");
             if not bep: STATE["daily_loss"]+=1
             STATE["active_trade"]=None; save_state(); await tg_send(f"{'🟡 BEP SL' if bep else '❌ SL'} BUY [{t['sess']}] {price:.2f}")
         elif price>=t['tp']:
@@ -283,7 +275,6 @@ async def ws_loop():
                         o=data["ohlc"]
                         c={"open":o["open"],"high":o["high"],"low":o["low"],"close":o["close"]}
                         if o["granularity"]==300:
-                            # candle baru
                             if len(CANDLES_M5)>0 and o["open_time"]!=CANDLES_M5[-1].get("open_time",0):
                                 CANDLES_M5.append({**c,"open_time":o["open_time"]})
                                 await scan()
